@@ -1,5 +1,3 @@
-
-
 #include <Arduino.h>
 #include <ArduinoOTA.h> //For Over-The-Air programming (OTA)
 #include <WiFi.h>
