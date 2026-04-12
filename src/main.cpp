@@ -1,10 +1,11 @@
 #include <Arduino.h>
-#include <ArduinoOTA.h> //For Over-The-Air programming (OTA)
+#include <ArduinoOTA.h> // Over-The-Air programming (OTA)
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPDash.h>
 #include <ESPmDNS.h>
+#include <LittleFS.h> // Little File System for storing temp readings in FLASH memory
 #include "max6675.h"
 
 /* --- WiFi Credentials --- */
@@ -15,23 +16,6 @@ const char *password = ""; // Password
 AsyncWebServer server(80);
 ESPDash dashboard(server);
 dash::GenericCard countdown(dashboard, "Countdown");
-
-/* --- Declare Dashboard Charts & Cards --- */
-//T5 is the original 03/19/26
-// dash::SeparatorCard sep5(dashboard, "T5 Probe");
-// dash::TemperatureCard tempcard5(dashboard, "Live Temp T5");
-// dash::TemperatureCard lastAverageTempCard5(dashboard, "Latest average temp T5");
-// dash::BarChart<const char *, float> bar5(dashboard, "T5 Temp Log (3 hours)");
-
-// dash::SeparatorCard sep2(dashboard, "T2 Probe");
-// dash::TemperatureCard tempcard2(dashboard, "Live Temp T2");
-// dash::TemperatureCard lastAverageTempCard2(dashboard, "Latest average temp T2");
-// dash::BarChart<const char *, float> bar2(dashboard, "T2 Temp Log (3 hours)");
-
-// dash::SeparatorCard sep1(dashboard, "T1 Probe");
-// dash::TemperatureCard tempcard1(dashboard, "Live Temp T1");
-// dash::TemperatureCard lastAverageTempCard1(dashboard, "Latest average temp T1");
-// dash::BarChart<const char *, float> bar1(dashboard, "T1 Temp Log (3 hours)");
 
 dash::SeparatorCard sep5(dashboard, "Probes");
 dash::TemperatureCard tempcard5(dashboard, "Live Temp T5");
@@ -48,19 +32,24 @@ dash::TemperatureCard lastAverageTempCard2(dashboard, "LMA T2");
 dash::TemperatureCard lastAverageTempCard1(dashboard, "LMA T1");
 
 dash::SeparatorCard sep2(dashboard, "Temp Logs");
-dash::BarChart<const char *, float> bar5(dashboard, "T5 Temp Log (3 hours)");
-dash::BarChart<const char *, float> bar4(dashboard, "T4 Temp Log (3 hours)");
-dash::BarChart<const char *, float> bar3(dashboard, "T3 Temp Log (3 hours)");
-dash::BarChart<const char *, float> bar2(dashboard, "T2 Temp Log (3 hours)");
-dash::BarChart<const char *, float> bar1(dashboard, "T1 Temp Log (3 hours)");
+dash::BarChart<const char *, float> bar5(dashboard, "T5 Temp Log (8 hours)");
+dash::BarChart<const char *, float> bar4(dashboard, "T4 Temp Log (8 hours)");
+dash::BarChart<const char *, float> bar3(dashboard, "T3 Temp Log (8 hours)");
+dash::BarChart<const char *, float> bar2(dashboard, "T2 Temp Log (8 hours)");
+dash::BarChart<const char *, float> bar1(dashboard, "T1 Temp Log (8 hours)");
 
 
 /* --- Global Configuration --- */
-const int PING_DELAY = 1000;                                                   // How quickly the webpage updates in ms
-const int NUM_TEMP_SAMPLES = 15 ;                                              // "Resolution" of your average temperature in ms (how many samples to take across TOT_TEMP_SAMPLE_RANGE)
-const unsigned int TOT_TEMP_SAMPLE_RANGE = 60000;                              // Each bar in the history temp chart will be the average temp across this many ms
-const int SINGLE_TEMP_SAMPLE_DELAY = TOT_TEMP_SAMPLE_RANGE / NUM_TEMP_SAMPLES; // ^...equally spaced out readings that is
-const unsigned long MAX_POINTS = 180;                                         // Max # of bars in chart before scrolling visual begins
+const int PING_DELAY = 1000;                                                     // How quickly the webpage updates in ms
+const int NUM_TEMP_SAMPLES = 15 ;                                               // "Resolution" of your average temperature in ms (how many samples to take across TOT_TEMP_SAMPLE_RANGE)
+const unsigned int TOT_TEMP_SAMPLE_RANGE = 60000;                                // Each bar in the history temp chart will be the average temp across this many ms
+const int SINGLE_TEMP_SAMPLE_DELAY = TOT_TEMP_SAMPLE_RANGE / NUM_TEMP_SAMPLES;  // ^...equally spaced out readings that is
+const unsigned long MAX_POINTS = 480;                                           // Max # of bars in chart before scrolling visual begins
+
+const bool WRITE_TO_CSV = true;                                                 // Enable/disable .csv writes
+const bool DELETE_CSV = true;                                                   // Enable/disable deletion of the .csv file listed in FILENAME var
+const char *FILENAME = "/smoker.csv";
+
 
 /* --- Storage of Temp Readings --- */
 char labels5[MAX_POINTS][12];
@@ -82,13 +71,13 @@ float YAxis2[MAX_POINTS];
 float YAxis1[MAX_POINTS];
 
 /* --- Pin & Sensor Config --- */
-const int thermoCS5 = 32;
-const int thermoCS4 = 17;
-const int thermoCS3 = 5;
-const int thermoCS2 = 26;
-const int thermoCS1 = 18;
-const int thermoSO = 33;    //Shared line between all MAX6675 modules
-const int thermoCLK = 25;   //Shared line between all MAX6675 modules
+const int thermoCS5 = 27;
+const int thermoCS4 = 25;
+const int thermoCS3 = 32;
+const int thermoCS2 = 18;
+const int thermoCS1 = 22;
+const int thermoSO = 19;    //Shared line between all MAX6675 modules
+const int thermoCLK = 12;   //Shared line between all MAX6675 modules
 MAX6675 thermocouple5(thermoCLK, thermoCS5, thermoSO);
 MAX6675 thermocouple4(thermoCLK, thermoCS4, thermoSO);
 MAX6675 thermocouple3(thermoCLK, thermoCS3, thermoSO);
@@ -123,29 +112,54 @@ float liveT1 = 0.0;           // Stores the live temperature
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  WiFi.setSleep(false); // High performance mode, fixes mDNS "beer.local" not connecting occasionally
+  WiFi.setSleep(false); //High performance mode, fixes mDNS "beer.local" not connecting occasionally
   while (WiFi.status() != WL_CONNECTED)
   {
-    delay(500);
-    Serial.print(".");
+    delay(2000);
+    Serial.println(WiFi.status());
   }
 
-  Serial.println("\nIP Address: " + WiFi.localIP().toString());
+  // Init OTA listener
+  ArduinoOTA.begin();
 
-  if(
-    !MDNS.begin("smoker")){Serial.println("Error starting mDNS");}
-  else{
-    Serial.println("mDNS started: http://smoker.local");}
+  // Init debug prints
+  Serial.println("\nIP Address: " + WiFi.localIP().toString());
+  if (!MDNS.begin("smoker")){Serial.println("Error starting mDNS");}
+  else{Serial.println("mDNS started: http://smoker.local");}
+  if (!LittleFS.begin(true)){Serial.println("LittleFS Mount Failed");}
+  else{Serial.println("LittleFS mounted");}
+
+  // Delete .csv file if DELETE_CSV flag is set & the file exists
+  if(DELETE_CSV && LittleFS.exists(FILENAME)){
+    if(LittleFS.remove(FILENAME)){Serial.print("CSV deleted: "); Serial.println(FILENAME);}
+    else{Serial.println("Delete failed");}
+  }
+
+  // Init littleFS .csv file if not exists
+  if (!LittleFS.exists(FILENAME) && WRITE_TO_CSV)
+  {
+    File file = LittleFS.open(FILENAME, "w");
+    if (file)
+    {
+      file.println("Minute,T1_Temp,T2_Temp,T3_Temp,T4_Temp,T5_Temp");
+      file.close();
+      Serial.println("Created smoker.csv");
+    }
+  }
+
+  server.serveStatic(FILENAME, LittleFS, FILENAME); // Download .csv at http://smoker.local/hourly.csv (or 192.168.1.95:8080/hourly.csv, depends on network)
 
   server.begin();
 }
 
 void loop()
 {
+  ArduinoOTA.handle(); // Listen for OTA program upload event
+
   unsigned long currentMillis = millis();
 
   // --- STEP 0: Frequent Dashboard Update For Countdown---
@@ -312,14 +326,31 @@ void loop()
         bar1.setY(YAxis1, MAX_POINTS);
       }
 
-      // Serial.print("Avg Temp: ");
-      // Serial.println(currentT5);
-
-      // Serial.print("Avg Temp: ");
-      // Serial.println(currentT2);
-
-      // Serial.print("Avg Temp: ");
-      // Serial.println(currentT1);
+      // Append to CSV (once per minute)
+      if (WRITE_TO_CSV)
+      {
+        File file = LittleFS.open(FILENAME, "a");
+        if (file)
+        {
+          file.print(updateCtr);
+          file.print(",");
+          file.print(currentT1, 2);   // 2 decimal places
+          file.print(",");
+          file.print(currentT2, 2);   // 2 decimal places
+          file.print(",");
+          file.print(currentT3, 2);   // 2 decimal places
+          file.print(",");
+          file.print(currentT4, 2);   // 2 decimal places
+          file.print(",");
+          file.println(currentT5, 2); // 2 decimal places
+          file.close();
+          Serial.println("Logged minute temp to CSV");
+        }
+        else
+        {
+          Serial.println("Failed to open CSV for appending");
+        }
+      }
     }
   }
 
