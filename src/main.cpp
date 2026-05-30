@@ -6,11 +6,12 @@
 #include <ESPDash.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h> // Little File System for storing temp readings in FLASH memory
-#include "max6675.h"
+// #include "max6675.h"
+#include "Adafruit_MAX31855.h"
 
 /* --- WiFi Credentials --- */
-const char *ssid = "";    // SSID
-const char *password = ""; // Password
+const char *ssid = "CenturyLink8305";    // SSID
+const char *password = "3mp9qp6eh9jf7q"; // Password
 
 /* --- Server & Dashboard Setup --- */
 AsyncWebServer server(80);
@@ -18,6 +19,7 @@ ESPDash dashboard(server);
 dash::GenericCard countdown(dashboard, "Countdown");
 
 dash::SeparatorCard sep5(dashboard, "Probes");
+// dash::TemperatureCard tempcard6(dashboard, "Live Temp T6");
 dash::TemperatureCard tempcard5(dashboard, "Live Temp T5");
 dash::TemperatureCard tempcard4(dashboard, "Live Temp T4");
 dash::TemperatureCard tempcard3(dashboard, "Live Temp T3");
@@ -25,6 +27,7 @@ dash::TemperatureCard tempcard2(dashboard, "Live Temp T2");
 dash::TemperatureCard tempcard1(dashboard, "Live Temp T1");
 
 dash::SeparatorCard sep1(dashboard, "Last Minute Average");
+// dash::TemperatureCard lastAverageTempCard6(dashboard, "LMA T6");
 dash::TemperatureCard lastAverageTempCard5(dashboard, "LMA T5");
 dash::TemperatureCard lastAverageTempCard4(dashboard, "LMA T4");
 dash::TemperatureCard lastAverageTempCard3(dashboard, "LMA T3");
@@ -32,6 +35,7 @@ dash::TemperatureCard lastAverageTempCard2(dashboard, "LMA T2");
 dash::TemperatureCard lastAverageTempCard1(dashboard, "LMA T1");
 
 dash::SeparatorCard sep2(dashboard, "Temp Logs");
+// dash::BarChart<const char *, float> bar6(dashboard, "T6 Temp Log (8 hours)");
 dash::BarChart<const char *, float> bar5(dashboard, "T5 Temp Log (8 hours)");
 dash::BarChart<const char *, float> bar4(dashboard, "T4 Temp Log (8 hours)");
 dash::BarChart<const char *, float> bar3(dashboard, "T3 Temp Log (8 hours)");
@@ -41,7 +45,7 @@ dash::BarChart<const char *, float> bar1(dashboard, "T1 Temp Log (8 hours)");
 
 /* --- Global Configuration --- */
 const int PING_DELAY = 1000;                                                     // How quickly the webpage updates in ms
-const int NUM_TEMP_SAMPLES = 15 ;                                               // "Resolution" of your average temperature in ms (how many samples to take across TOT_TEMP_SAMPLE_RANGE)
+const int NUM_TEMP_SAMPLES = 60;                                                // "Resolution" of your average temperature in ms (how many samples to take across TOT_TEMP_SAMPLE_RANGE)
 const unsigned int TOT_TEMP_SAMPLE_RANGE = 60000;                                // Each bar in the history temp chart will be the average temp across this many ms
 const int SINGLE_TEMP_SAMPLE_DELAY = TOT_TEMP_SAMPLE_RANGE / NUM_TEMP_SAMPLES;  // ^...equally spaced out readings that is
 const unsigned long MAX_POINTS = 480;                                           // Max # of bars in chart before scrolling visual begins
@@ -52,18 +56,21 @@ const char *FILENAME = "/smoker.csv";
 
 
 /* --- Storage of Temp Readings --- */
+// char labels6[MAX_POINTS][12];
 char labels5[MAX_POINTS][12];
 char labels4[MAX_POINTS][12];
 char labels3[MAX_POINTS][12];
 char labels2[MAX_POINTS][12];
 char labels1[MAX_POINTS][12];
 
+// const char *XAxis6[MAX_POINTS];
 const char *XAxis5[MAX_POINTS];
 const char *XAxis4[MAX_POINTS];
 const char *XAxis3[MAX_POINTS];
 const char *XAxis2[MAX_POINTS];
 const char *XAxis1[MAX_POINTS];
 
+// float YAxis6[MAX_POINTS];
 float YAxis5[MAX_POINTS];
 float YAxis4[MAX_POINTS];
 float YAxis3[MAX_POINTS];
@@ -71,18 +78,22 @@ float YAxis2[MAX_POINTS];
 float YAxis1[MAX_POINTS];
 
 /* --- Pin & Sensor Config --- */
+// const int thermoCS6 = 14;
 const int thermoCS5 = 27;
-const int thermoCS4 = 25;
-const int thermoCS3 = 32;
-const int thermoCS2 = 18;
-const int thermoCS1 = 22;
-const int thermoSO = 19;    //Shared line between all MAX6675 modules
-const int thermoCLK = 12;   //Shared line between all MAX6675 modules
-MAX6675 thermocouple5(thermoCLK, thermoCS5, thermoSO);
-MAX6675 thermocouple4(thermoCLK, thermoCS4, thermoSO);
-MAX6675 thermocouple3(thermoCLK, thermoCS3, thermoSO);
-MAX6675 thermocouple2(thermoCLK, thermoCS2, thermoSO);
-MAX6675 thermocouple1(thermoCLK, thermoCS1, thermoSO);
+const int thermoCS4 = 26;
+const int thermoCS3 = 25;
+const int thermoCS2 = 32;
+const int thermoCS1 = 33;
+const int thermoSO = 19;    //Shared line between all MAX31855 modules
+const int thermoCLK = 12;   //Shared line between all MAX31855 modules
+
+// Adafruit_MAX31855 thermocouple6(thermoCLK, thermoCS6, thermoSO);
+Adafruit_MAX31855 thermocouple5(thermoCLK, thermoCS5, thermoSO);
+Adafruit_MAX31855 thermocouple4(thermoCLK, thermoCS4, thermoSO);
+Adafruit_MAX31855 thermocouple3(thermoCLK, thermoCS3, thermoSO);
+Adafruit_MAX31855 thermocouple2(thermoCLK, thermoCS2, thermoSO);
+Adafruit_MAX31855 thermocouple1(thermoCLK, thermoCS1, thermoSO);
+
 
 /* --- Non-Blocking Timing Variables --- */
 int pingctr = 0;                  // For the "seconds till next average" card value
@@ -91,19 +102,22 @@ unsigned long lastSampleTime = 0; // For spacing out temp readings for the avera
 int sampleCtr = 0;                // The number of temperature samples the next bar in the bar chart has had done
 
 /* --- Temperature Averaging Variables --- */
+// float runningT_sum6 = 0.0;    // Sum of the ongoing average's temp readings so far
 float runningT_sum5 = 0.0;    // Sum of the ongoing average's temp readings so far
 float runningT_sum4 = 0.0;    // Sum of the ongoing average's temp readings so far
 float runningT_sum3 = 0.0;    // Sum of the ongoing average's temp readings so far
 float runningT_sum2 = 0.0;    // Sum of the ongoing average's temp readings so far
 float runningT_sum1 = 0.0;    // Sum of the ongoing average's temp readings so far
 
-unsigned long updateCtr = 0; // # of average readings have been calculated (when to begin scrolling the barchart instead of appending)
+unsigned long updateCtr = 0;  // # of average readings have been calculated (when to begin scrolling the barchart instead of appending)
+// float currentT6 = 0.0;        // Stores the latest calculated average
 float currentT5 = 0.0;        // Stores the latest calculated average
 float currentT4 = 0.0;        // Stores the latest calculated average
 float currentT3 = 0.0;        // Stores the latest calculated average
 float currentT2 = 0.0;        // Stores the latest calculated average
 float currentT1 = 0.0;        // Stores the latest calculated average
 
+// float liveT6 = 0.0;           // Stores the live temperature
 float liveT5 = 0.0;           // Stores the live temperature
 float liveT4 = 0.0;           // Stores the live temperature
 float liveT3 = 0.0;           // Stores the live temperature
@@ -112,6 +126,9 @@ float liveT1 = 0.0;           // Stores the live temperature
 
 void setup()
 {
+
+  delay(1000);
+
   Serial.begin(115200);
 
   WiFi.mode(WIFI_STA);
@@ -146,18 +163,27 @@ void setup()
     if (file)
     {
       file.println("Minute,T1_Temp,T2_Temp,T3_Temp,T4_Temp,T5_Temp");
+      // file.println("Minute,T1_Temp,T2_Temp,T3_Temp,T4_Temp,T5_Temp,T6_Temp");
+
       file.close();
       Serial.println("Created smoker.csv");
     }
   }
 
-  server.serveStatic(FILENAME, LittleFS, FILENAME); // Download .csv at http://smoker.local/hourly.csv (or 192.168.1.95:8080/hourly.csv, depends on network)
+  thermocouple1.begin();
+  thermocouple2.begin();
+  thermocouple3.begin();
+  thermocouple4.begin();
+  thermocouple5.begin();
+  // thermocouple6.begin();
 
+  server.serveStatic(FILENAME, LittleFS, FILENAME); // Download .csv at http://smoker.local/hourly.csv (or 192.168.1.95:8080/hourly.csv, depends on network)
   server.begin();
 }
 
 void loop()
 {
+
   ArduinoOTA.handle(); // Listen for OTA program upload event
 
   unsigned long currentMillis = millis();
@@ -184,12 +210,23 @@ void loop()
   // --- STEP 1: Non-Blocking Sampling ---
   if (currentMillis - lastSampleTime >= SINGLE_TEMP_SAMPLE_DELAY)
   {
+
+    Serial.println(thermocouple3.readInternal());
+    Serial.println(thermocouple5.readError());
+    Serial.println(thermocouple4.readError());
+    Serial.println(thermocouple3.readError());
+    Serial.println(thermocouple2.readError());
+    Serial.println(thermocouple1.readError());
+    Serial.println();
+
+    // liveT6 = thermocouple6.readFahrenheit();
     liveT5 = thermocouple5.readFahrenheit();
     liveT4 = thermocouple4.readFahrenheit();
     liveT3 = thermocouple3.readFahrenheit();
     liveT2 = thermocouple2.readFahrenheit();
     liveT1 = thermocouple1.readFahrenheit();
 
+    // runningT_sum6 += liveT6;
     runningT_sum5 += liveT5;
     runningT_sum4 += liveT4;
     runningT_sum3 += liveT3;
@@ -197,6 +234,7 @@ void loop()
     runningT_sum1 += liveT1;
 
     sampleCtr++;
+    // tempcard6.setValue(liveT6);
     tempcard5.setValue(liveT5);
     tempcard4.setValue(liveT4);
     tempcard3.setValue(liveT3);
@@ -208,6 +246,7 @@ void loop()
     // --- STEP 2: Process Average & Update Dashboard ---
     if (sampleCtr >= NUM_TEMP_SAMPLES)
     {
+      // currentT6 = runningT_sum6 / NUM_TEMP_SAMPLES;
       currentT5 = runningT_sum5 / NUM_TEMP_SAMPLES;
       currentT4 = runningT_sum4 / NUM_TEMP_SAMPLES;
       currentT3 = runningT_sum3 / NUM_TEMP_SAMPLES;
@@ -215,6 +254,7 @@ void loop()
       currentT1 = runningT_sum1 / NUM_TEMP_SAMPLES;
 
       // Reset for next batch
+      // runningT_sum6 = 0;
       runningT_sum5 = 0;
       runningT_sum4 = 0;
       runningT_sum3 = 0;
@@ -224,12 +264,14 @@ void loop()
       sampleCtr = 0;
 
       // Update Cards
+      // tempcard6.setValue(currentT6);
       tempcard5.setValue(currentT5);
       tempcard4.setValue(currentT4);
       tempcard3.setValue(currentT3);
       tempcard2.setValue(currentT2);
       tempcard1.setValue(currentT1);
 
+      // lastAverageTempCard6.setValue(currentT6);
       lastAverageTempCard5.setValue(currentT5);
       lastAverageTempCard4.setValue(currentT4);
       lastAverageTempCard3.setValue(currentT3);
@@ -241,30 +283,35 @@ void loop()
       if (updateCtr <= MAX_POINTS)
       {
         int index = updateCtr - 1;
+        // ltoa(updateCtr, labels6[index], 10);
         ltoa(updateCtr, labels5[index], 10);
         ltoa(updateCtr, labels4[index], 10);
         ltoa(updateCtr, labels3[index], 10);
         ltoa(updateCtr, labels2[index], 10);
         ltoa(updateCtr, labels1[index], 10);
 
+        // XAxis6[index] = labels6[index];
         XAxis5[index] = labels5[index];
         XAxis4[index] = labels4[index];
         XAxis3[index] = labels3[index];
         XAxis2[index] = labels2[index];
         XAxis1[index] = labels1[index];
 
+        // YAxis6[index] = currentT6;
         YAxis5[index] = currentT5;
         YAxis4[index] = currentT4;
         YAxis3[index] = currentT3;
         YAxis2[index] = currentT2;
         YAxis1[index] = currentT1;
 
+        // bar6.setX(XAxis6, updateCtr);
         bar5.setX(XAxis5, updateCtr);
         bar4.setX(XAxis4, updateCtr);
         bar3.setX(XAxis3, updateCtr);
         bar2.setX(XAxis2, updateCtr);
         bar1.setX(XAxis1, updateCtr);
-        
+
+        // bar6.setY(YAxis6, updateCtr);
         bar5.setY(YAxis5, updateCtr);
         bar4.setY(YAxis4, updateCtr);
         bar3.setY(YAxis3, updateCtr);
@@ -276,18 +323,21 @@ void loop()
         // Shift data left
         for (int i = 0; i < MAX_POINTS - 1; i++)
         {
+          // strcpy(labels6[i], labels6[i + 1]);
           strcpy(labels5[i], labels5[i + 1]);
           strcpy(labels4[i], labels4[i + 1]);
           strcpy(labels3[i], labels3[i + 1]);
           strcpy(labels2[i], labels2[i + 1]);
           strcpy(labels1[i], labels1[i + 1]);
 
+          // YAxis6[i] = YAxis6[i + 1];
           YAxis5[i] = YAxis5[i + 1];
           YAxis4[i] = YAxis4[i + 1];
           YAxis3[i] = YAxis3[i + 1];
           YAxis2[i] = YAxis2[i + 1];
           YAxis1[i] = YAxis1[i + 1];
 
+          // XAxis6[i] = labels6[i];
           XAxis5[i] = labels5[i];
           XAxis4[i] = labels4[i];
           XAxis3[i] = labels3[i];
@@ -295,30 +345,35 @@ void loop()
           XAxis1[i] = labels1[i];
         }
         // Add new data to end
+        // ltoa(updateCtr, labels6[MAX_POINTS - 1], 10);
         ltoa(updateCtr, labels5[MAX_POINTS - 1], 10);
         ltoa(updateCtr, labels4[MAX_POINTS - 1], 10);
         ltoa(updateCtr, labels3[MAX_POINTS - 1], 10);
         ltoa(updateCtr, labels2[MAX_POINTS - 1], 10);
         ltoa(updateCtr, labels1[MAX_POINTS - 1], 10);
 
+        // YAxis6[MAX_POINTS - 1] = currentT6;
         YAxis5[MAX_POINTS - 1] = currentT5;
         YAxis4[MAX_POINTS - 1] = currentT4;
         YAxis3[MAX_POINTS - 1] = currentT3;
         YAxis2[MAX_POINTS - 1] = currentT2;
         YAxis1[MAX_POINTS - 1] = currentT1;
 
+        // XAxis6[MAX_POINTS - 1] = labels6[MAX_POINTS - 1];
         XAxis5[MAX_POINTS - 1] = labels5[MAX_POINTS - 1];
         XAxis4[MAX_POINTS - 1] = labels4[MAX_POINTS - 1];
         XAxis3[MAX_POINTS - 1] = labels3[MAX_POINTS - 1];
         XAxis2[MAX_POINTS - 1] = labels2[MAX_POINTS - 1];
         XAxis1[MAX_POINTS - 1] = labels1[MAX_POINTS - 1];
 
+        // bar6.setX(XAxis6, MAX_POINTS);
         bar5.setX(XAxis5, MAX_POINTS);
         bar4.setX(XAxis4, MAX_POINTS);
         bar3.setX(XAxis3, MAX_POINTS);
         bar2.setX(XAxis2, MAX_POINTS);
         bar1.setX(XAxis1, MAX_POINTS);
-        
+
+        // bar6.setY(YAxis6, MAX_POINTS);
         bar5.setY(YAxis5, MAX_POINTS);
         bar4.setY(YAxis4, MAX_POINTS);
         bar3.setY(YAxis3, MAX_POINTS);
@@ -343,6 +398,8 @@ void loop()
           file.print(currentT4, 2);   // 2 decimal places
           file.print(",");
           file.println(currentT5, 2); // 2 decimal places
+          // file.print(",");
+          // file.print(currentT6, 2); // 2 decimal places
           file.close();
           Serial.println("Logged minute temp to CSV");
         }
