@@ -10,8 +10,8 @@
 #include "Adafruit_MAX31855.h"
 
 /* --- WiFi Credentials --- */
-const char *ssid = "CenturyLink8305";    // SSID
-const char *password = "3mp9qp6eh9jf7q"; // Password
+const char *ssid = "";    // SSID
+const char *password = ""; // Password
 
 /* --- Server & Dashboard Setup --- */
 AsyncWebServer server(80);
